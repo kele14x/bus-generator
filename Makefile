@@ -5,6 +5,7 @@ PYTEST := uv run pytest
 GENERATED := generated
 SAMPLES := field_access gpio mem_access nested_addrmaps ram simple wstrb
 TEMPLATES := axi4l c_header tb_axi4l
+GENERATOR_SOURCES := $(wildcard src/bus_generator/*.py)
 
 AXI4L_ARTIFACTS := $(addprefix $(GENERATED)/axi4l/,$(addsuffix _regs.v,$(SAMPLES)))
 C_HEADER_ARTIFACTS := $(addprefix $(GENERATED)/c_header/,$(addsuffix .h,$(SAMPLES)))
@@ -45,20 +46,20 @@ unit:
 # Render configured samples and templates into ./generated/<template>/ for reuse.
 artifacts: $(ARTIFACTS)
 
-$(GENERATED)/axi4l/%_regs.v: samples/%.rdl src/bus_generator/templates/{{axi4l}}_regs.v.jinja2
+$(GENERATED)/axi4l/%_regs.v: samples/%.rdl src/bus_generator/templates/{{axi4l}}_regs.v.jinja2 $(GENERATOR_SOURCES)
 	@mkdir -p $(@D)
 	uv run bus-generator $< -o $(@D) -t axi4l
 
-$(GENERATED)/c_header/%.h: samples/%.rdl src/bus_generator/templates/{{c_header}}.h.jinja2
+$(GENERATED)/c_header/%.h: samples/%.rdl src/bus_generator/templates/{{c_header}}.h.jinja2 $(GENERATOR_SOURCES)
 	@mkdir -p $(@D)
 	uv run bus-generator $< -o $(@D) -t c_header
 
-$(GENERATED)/tb_axi4l/tb_%_regs.v: samples/%.rdl src/bus_generator/templates/tb_{{axi4l}}_regs.v.jinja2
+$(GENERATED)/tb_axi4l/tb_%_regs.v: samples/%.rdl src/bus_generator/templates/tb_{{axi4l}}_regs.v.jinja2 $(GENERATOR_SOURCES)
 	@mkdir -p $(@D)
 	uv run bus-generator $< -o $(@D) -t tb_axi4l
 
-# All sim-marked tests against reusable generated/ artifacts; requires SIM.
-sim: $(AXI4L_ARTIFACTS) $(TB_AXI4L_ARTIFACTS)
+# Simulator tests generate fresh sources in their own build directories.
+sim:
 	$(PYTEST) -m sim
 
 # Remove generated/local artifacts: bytecode caches, pytest cache, sim build

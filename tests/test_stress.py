@@ -6,11 +6,11 @@ one ``@cocotb.test`` case from this module. Cocotb owns pass/fail;
 ``runner.test()`` exits non-zero under pytest if the selected test fails or
 times out.
 
-Sources are read from the ``generated/`` tree so manual edits to the RTL survive
-a re-run. Select Icarus, Verilator, or Questa with ``SIM=icarus``,
+Sources are freshly generated from the sample RDL in each test's build directory.
+Select Icarus, Verilator, or Questa with ``SIM=icarus``,
 ``SIM=verilator``, or ``SIM=questa``.
 ``SIM`` is required and passed directly to cocotb's runner.
-Missing simulator executables or generated DUT artifacts fail rather than skip.
+Missing simulator executables or generation failures fail rather than skip.
 """
 
 import os
@@ -34,10 +34,10 @@ from cocotb.triggers import (
 from systemrdl.compiler import RDLCompiler
 from systemrdl.walker import RDLWalker
 
+from bus_generator import main
 from bus_generator.bus_generator import FieldsGatheringListener, MemGatheringListener
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-GENERATED = REPO_ROOT / "generated"
 TESTS_DIR = Path(__file__).resolve().parent
 SAMPLES_DIR = REPO_ROOT / "samples"
 
@@ -1866,9 +1866,6 @@ def _write_contract_wrapper(source, top, build_dir, *, combinational):
 
 def _run_cocotb_test(top, testcase):
     sim = os.environ["SIM"]
-    dut = GENERATED / "axi4l" / f"{top}_regs.v"
-    if not dut.is_file():
-        pytest.fail(f"missing {dut}; run `make artifacts` first", pytrace=False)
 
     if str(TESTS_DIR) not in sys.path:
         sys.path.insert(0, str(TESTS_DIR))
@@ -1877,6 +1874,9 @@ def _run_cocotb_test(top, testcase):
     runner = get_runner(sim)
     build_dir = REPO_ROOT / "sim_build" / "stress" / top / sim / testcase
     build_dir.mkdir(parents=True, exist_ok=True)
+    source_dir = build_dir / "sources"
+    main([str(SAMPLES_DIR / f"{top}.rdl"), "-o", str(source_dir), "-t", "axi4l"])
+    dut = source_dir / f"{top}_regs.v"
     hdl_toplevel = f"{top}_regs"
     sources = [str(dut)]
     if testcase.startswith("ram_"):

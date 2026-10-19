@@ -70,3 +70,7 @@ SIM=icarus uv run pytest -m sim
 The full ``uv run pytest`` suite includes simulator-marked tests, so it also
 requires ``SIM``. Use ``uv run pytest -m "not sim"`` for tests that do not need a
 simulator.
+
+Simulation tests generate fresh RTL and testbenches in their test/build
+directories. They do not require or reuse `generated/`; `make artifacts`
+maintains that directory separately for manual use.

@@ -16,20 +16,6 @@ No known issues observed.
 
 ## Verification
 
-### KI-12 [P1] Simulation may use stale artifacts or skip missing artifacts
-
-- **Location:** `Makefile:33-43`, `tests/test_simulation.py:144-147`, and
-  `tests/test_stress.py:727-729`.
-- **Cause:** Artifact prerequisites omit generator Python sources. Direct pytest
-  runs skip simulator cases when generated files are absent.
-- **Evidence:** `make -n -W src/bus_generator/bus_generator.py artifacts` reported
-  nothing to rebuild. With artifacts absent, all 26 artifact-dependent simulator
-  cases can skip despite a valid simulator selection.
-- **Impact:** A green run need not verify current generator output. Skipped
-  artifact-dependent tests do not attempt to launch the selected simulator.
-- **Suggested resolution:** Include generator dependencies and generate fresh
-  artifacts for automated verification, or fail clearly when they are missing.
-
 ### KI-13 [P1] Read-overlap checks use indistinguishable data
 
 - **Location:** `tests/test_stress.py:595-611`.

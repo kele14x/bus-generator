@@ -11,7 +11,6 @@ import pytest
 from bus_generator import main
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-GENERATED = REPO_ROOT / "generated"
 
 
 def _run_icarus(top, dut, tb, tmp_path):
@@ -128,10 +127,18 @@ def _run_questa(top, dut, tb, tmp_path):
 def test_self_check_tb(top, tmp_path):
     sim = os.environ["SIM"]
 
-    dut = GENERATED / "axi4l" / f"{top}_regs.v"
-    tb = GENERATED / "tb_axi4l" / f"tb_{top}_regs.v"
-    if not dut.is_file() or not tb.is_file():
-        pytest.skip(f"missing {dut.name}/{tb.name}; run `make artifacts` first")
+    main(
+        [
+            str(REPO_ROOT / "samples" / f"{top}.rdl"),
+            "-o",
+            str(tmp_path),
+            "-t",
+            "axi4l",
+            "tb_axi4l",
+        ]
+    )
+    dut = tmp_path / f"{top}_regs.v"
+    tb = tmp_path / f"tb_{top}_regs.v"
 
     returncode, output = {
         "icarus": _run_icarus,
