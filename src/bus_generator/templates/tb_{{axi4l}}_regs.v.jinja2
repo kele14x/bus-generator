@@ -222,6 +222,43 @@ module tb_{{ top_name }}_regs;
         end
     endtask
 
+    {%- if mems %}
+    // Boundary probes can hit another register or memory. Determine permission
+    // from the complete RDL map, independently of DUT decode/response signals.
+    task check_address_resp(input reg [{{ addr_width-1 }}:0] addr,
+                            input reg is_write,
+                            input reg [1:0] resp);
+        reg allowed;
+        begin
+            allowed = 1'b0;
+            {%- for field in fields %}
+                {%- if field.is_sw_readable or field.is_sw_writable %}
+            if (addr[{{ addr_width-1 }}:{{ addr_width_lsb }}] == 'h{{ '{:x}'.format(field.aligned_address) }} &&
+                (is_write ? 1'b{{ field.is_sw_writable | int }} : 1'b{{ field.is_sw_readable | int }})) begin
+                allowed = 1'b1;
+            end
+                {%- endif %}
+            {%- endfor %}
+            {%- for mem in mems %}
+                {%- if mem.is_sw_readable or mem.is_sw_writable %}
+            if ({1'b0, addr} < {{ addr_width+1 }}'h{{ '{:x}'.format(mem.address + mem.size) }} &&
+                    {%- if mem.address > 0 %}
+                addr >= {{ addr_width }}'h{{ '{:x}'.format(mem.address) }} &&
+                    {%- endif %}
+                (is_write ? 1'b{{ mem.is_sw_writable | int }} : 1'b{{ mem.is_sw_readable | int }})) begin
+                allowed = 1'b1;
+            end
+                {%- endif %}
+            {%- endfor %}
+            if (allowed) begin
+                check_resp(addr, resp);
+            end else begin
+                check_error_resp(addr, resp);
+            end
+        end
+    endtask
+    {%- endif %}
+
 
     // DUT
 
@@ -557,8 +594,8 @@ module tb_{{ top_name }}_regs;
 
         // {{ mem.hierarchy }}
         // The final valid word must select the external memory. The next two
-        // words are outside its exact byte range and must return SLVERR
-        // without selecting the memory.
+        // words must not select this memory; their responses depend on any
+        // neighboring mappings and the requested access direction.
             {%- if mem.is_sw_writable or mem.is_sw_readable %}
         addr = {{ addr_width }}'('h{{ '{:x}'.format(mem.address + mem.size - data_width // 8) }});
         wdata = $urandom();
@@ -572,25 +609,21 @@ module tb_{{ top_name }}_regs;
         check_resp(addr, resp);
             {%- endif %}
 
-        addr = {{ addr_width }}'('h{{ '{:x}'.format(mem.address + mem.size) }});
+            {%- for offset in [0, data_width // 8] %}
+                {%- set boundary_address = mem.address + mem.size + offset %}
+                {%- if boundary_address < 2 ** addr_width %}
+        addr = {{ addr_width }}'h{{ '{:x}'.format(boundary_address) }};
         {{ mem.name }}_range_invalid_access = 1'b1;
-            {%- if mem.is_sw_writable %}
+        wdata = $urandom();
         axi_write(addr, wdata, resp);
-            {%- else %}
+        check_address_resp(addr, 1'b1, resp);
         axi_read(addr, rdata, resp);
-            {%- endif %}
+        check_address_resp(addr, 1'b0, resp);
         {{ mem.name }}_range_invalid_access = 1'b0;
-        check_error_resp(addr, resp);
-
-        addr = {{ addr_width }}'('h{{ '{:x}'.format(mem.address + mem.size + data_width // 8) }});
-        {{ mem.name }}_range_invalid_access = 1'b1;
-            {%- if mem.is_sw_writable %}
-        axi_write(addr, wdata, resp);
-            {%- else %}
-        axi_read(addr, rdata, resp);
-            {%- endif %}
-        {{ mem.name }}_range_invalid_access = 1'b0;
-        check_error_resp(addr, resp);
+                {%- else %}
+        // Boundary 'h{{ '{:x}'.format(boundary_address) }} is outside the AXI address space; do not wrap it.
+                {%- endif %}
+            {%- endfor %}
 
             {%- if mem.is_sw_writable %}
         for (i = 0; i < {{ mem.mementries }}; i = i + 1) begin
