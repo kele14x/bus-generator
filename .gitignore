@@ -2,6 +2,7 @@
 ~
 *.bak
 *.bkp
+*.swp
 
 # IDE
 .idea/
