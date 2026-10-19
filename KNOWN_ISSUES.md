@@ -41,17 +41,6 @@ No known issues observed.
 - **Suggested resolution:** Initialize distinguishable values before issuing the
   overlapped reads, including read-only locations through the test model.
 
-### KI-14 [P1] Software/hardware merge checking trusts the DUT mask
-
-- **Location:** `src/bus_generator/templates/tb_{{axi4l}}_regs.v.jinja2:284-295`
-  and `:452-494`.
-- **Cause:** Expected merge data is calculated with `DUT.<field>_sw_mask`, the
-  same mask used by the implementation under test.
-- **Evidence:** An isolated mutation forcing GPIO's software mask to zero still
-  produced `TEST PASSED`, despite disabling software updates to that field.
-- **Suggested resolution:** Calculate expected masks independently from captured
-  AXI WSTRB and the field layout.
-
 ### KI-15 [P1] Memory-boundary tests can reject legal adjacent mappings
 
 - **Location:** `src/bus_generator/templates/tb_{{axi4l}}_regs.v.jinja2:545-563`.

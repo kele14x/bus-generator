@@ -279,21 +279,40 @@ module tb_{{ top_name }}_regs;
         {%- endfor %}
     );
 
-    {%- for field in fields %}
-        {%- if field.implements_storage and field.is_sw_writable and field.is_hw_writable and field.is_sw_readable %}
-    // Check the one-cycle software override for {{ field.hierarchy }}.
+    {%- set merge_fields = fields | selectattr("implements_storage") | selectattr("is_sw_writable") | selectattr("is_hw_writable") | selectattr("is_sw_readable") | list %}
+    {%- if merge_fields %}
+    // axi_write_be allows only one outstanding write. Capture the accepted
+    // payload independently of the DUT's internal data and byte-mask logic.
+    reg [{{ data_width-1 }}:0] merge_wdata;
+    reg [{{ (data_width // 8)-1 }}:0] merge_wstrb;
     always @(posedge s_axi_aclk) begin
+        if (!s_axi_aresetn) begin
+            merge_wdata <= 0;
+            merge_wstrb <= 0;
+        end else if (s_axi_wvalid && s_axi_wready) begin
+            merge_wdata <= s_axi_wdata;
+            merge_wstrb <= s_axi_wstrb;
+        end
+    end
+    {%- endif %}
+    {%- for field in merge_fields %}
+    // Check the one-cycle software override for {{ field.hierarchy }}.
+    always @(posedge s_axi_aclk) begin : check_{{ field.name }}_merge
+        reg [{{ field.width-1 }}:0] expected_merge;
+        integer bit_idx;
         if (s_axi_aresetn && DUT.int_wr_en && DUT.{{ field.name }}_sel) begin
+            // Snapshot hardware and expected data before the DUT's NBA update.
+            for (bit_idx = 0; bit_idx < {{ field.width }}; bit_idx = bit_idx + 1) begin
+                expected_merge[bit_idx] = merge_wstrb[({{ field.bus_lsb }} + bit_idx) / 8] ?
+                    merge_wdata[{{ field.bus_lsb }} + bit_idx] : {{ field.name }}_in[bit_idx];
+            end
             #1;
-            if (DUT.{{ field.name }}_value !==
-                (({{ field.name }}_in & ~DUT.{{ field.name }}_sw_mask) |
-                 (DUT.int_wr_data[{{ field.bus_msb }}:{{ field.bus_lsb }}] & DUT.{{ field.name }}_sw_mask))) begin
+            if (DUT.{{ field.name }}_value !== expected_merge) begin
                 errors = errors + 1;
                 $display("FAIL: {{ field.hierarchy }} software/hardware merge mismatch");
             end
         end
     end
-        {%- endif %}
     {%- endfor %}
 
 
@@ -438,6 +457,10 @@ module tb_{{ top_name }}_regs;
             {%- endif %}
             {%- if field.is_sw_writable %}
         wdata = $urandom();
+                {%- if field.implements_storage and field.is_hw_writable %}
+        // Opposite values expose a missing software override even for one bit.
+        wdata[{{ field.bus_msb }}:{{ field.bus_lsb }}] = ~{{ field.name }}_in;
+                {%- endif %}
         axi_write(addr, wdata, resp);
         check_resp(addr, resp);
                 {%- if field.is_hw_readable and not field.is_hw_writable %}
@@ -469,6 +492,9 @@ module tb_{{ top_name }}_regs;
                 {%- for wstrb_case in field.wstrb_cases %}
         be = {{ '{:2.0f}'.format(data_width/8) }}'h{{ '{:x}'.format(wstrb_case.be) }};
         wdata = $urandom();
+                {%- if field.is_hw_writable %}
+        wdata[{{ field.bus_msb }}:{{ field.bus_lsb }}] = ~{{ field.name }}_in;
+                {%- endif %}
         axi_write_be(addr, wdata, be, resp);
         check_resp(addr, resp);
                 {%- if not field.is_hw_writable %}
@@ -485,6 +511,9 @@ module tb_{{ top_name }}_regs;
 
         // WSTRB=0 acknowledges normally without changing software-owned bits.
         wdata = $urandom();
+                {%- if field.is_hw_writable %}
+        wdata[{{ field.bus_msb }}:{{ field.bus_lsb }}] = ~{{ field.name }}_in;
+                {%- endif %}
         axi_write_be(addr, wdata, { {{ '{:2.0f}'.format(data_width/8) }}{1'b0} }, resp);
         check_resp(addr, resp);
                 {%- if field.is_sw_readable and not field.is_hw_writable %}
