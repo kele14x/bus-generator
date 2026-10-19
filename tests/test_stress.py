@@ -709,18 +709,47 @@ async def stress_write_overlap(dut):
     )
 
 
-@cocotb.test(timeout_time=2, timeout_unit="ms")
-async def stress_read_overlap(dut):
-    top, model, master = await _setup_stress(dut, SEED_R, PipelinedReadMaster)
-
+async def _initialize_read_overlap(dut, model):
+    """Seed software-owned registers and read-only hardware inputs independently."""
     initializer = AxiLiteMaster(dut)
     for number, op in enumerate(op for op in model.write_ops if op["kind"] == "reg"):
         value = (0x89ABCDEF ^ (number * 0x10204081)) & DATA_MASK
         assert await initializer.write(op["addr"], value, STRB_MASK) == 0
         model.write(op, value, STRB_MASK, dut)
 
+    for number, field in enumerate(model.hw_fields):
+        if field["is_sw_readable"] and not field["is_sw_writable"]:
+            value = (0x76543210 ^ (number * 0x01020408)) & DATA_MASK
+            reg = model.regs[field["address"]]
+            reg["value"] = (reg["value"] & ~field["mask"]) | (
+                (value << field["low"]) & field["mask"]
+            )
+    model.drive_hw_inputs(dut)
+
+    # RAM (including read-only RAM) was seeded before the physical models
+    # copied it in _setup_stress. Reject weak fixtures before issuing traffic.
+    expected = [(*model.expected_read(op), op["addr"]) for op in model.read_ops]
+    for data, mask, addr in expected:
+        assert data != 0, f"read-overlap addr=0x{addr:x} was not initialized"
+        for other_data, _, other_addr in expected:
+            if other_addr != addr:
+                assert (other_data & mask) != data, (
+                    f"read-overlap addresses 0x{addr:x} and 0x{other_addr:x} "
+                    "have indistinguishable data"
+                )
+
+
+@cocotb.test(timeout_time=2, timeout_unit="ms")
+async def stress_read_overlap(dut):
+    top, model, master = await _setup_stress(dut, SEED_R, PipelinedReadMaster)
+    await _initialize_read_overlap(dut, model)
+
     count = int(os.environ.get("STRESS_R_COUNT", "64"))
-    reads = [random.choice(model.read_ops) for _ in range(count)]
+    # Cover every location at least once, then add randomized repeated reads.
+    reads = list(model.read_ops)
+    random.shuffle(reads)
+    reads += [random.choice(model.read_ops) for _ in range(max(0, count - len(reads)))]
+    count = len(reads)
     expected = []
     for op in reads:
         data, mask = model.expected_read(op)
@@ -737,6 +766,23 @@ async def stress_read_overlap(dut):
         f"{master.r_errors} errors (r_count={master.r_count}, expected={count})"
     )
     dut._log.info(f"{top} read-overlap stress passed: {count} reads, 0 errors")
+
+
+@cocotb.test(timeout_time=2, timeout_unit="ms")
+async def read_overlap_scoreboard(dut):
+    """Correct counts/statuses must not hide data returned in the wrong order."""
+    _, model, master = await _setup_stress(dut, SEED_R, PipelinedReadMaster)
+    await _initialize_read_overlap(dut, model)
+    assert len(model.read_ops) >= 2
+    reads = [model.read_ops[0], model.read_ops[-1]]
+    expected = [(*model.expected_read(op), op["addr"]) for op in reads]
+    drain_task = cocotb.start_soon(master.r_drain(expected, len(reads)))
+    # Deliberately submit reversed addresses while retaining original expectations.
+    for op in reversed(reads):
+        await master.issue_read(op["addr"])
+    await drain_task
+    assert master.r_count == 2
+    assert master.r_errors == 2, "read checker accepted swapped address data"
 
 
 @cocotb.test(timeout_time=3, timeout_unit="ms")
@@ -1987,6 +2033,12 @@ def test_stress_write_overlap(top):
 @pytest.mark.parametrize("top", SAMPLES)
 def test_stress_read_overlap(top):
     _run_cocotb_test(top, "stress_read_overlap")
+
+
+@pytest.mark.sim
+@pytest.mark.parametrize("top", SAMPLES)
+def test_read_overlap_scoreboard(top):
+    _run_cocotb_test(top, "read_overlap_scoreboard")
 
 
 @pytest.mark.sim

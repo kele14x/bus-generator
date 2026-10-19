@@ -16,17 +16,6 @@ No known issues observed.
 
 ## Verification
 
-### KI-13 [P1] Read-overlap checks use indistinguishable data
-
-- **Location:** `tests/test_stress.py:595-611`.
-- **Cause:** The test issues reads immediately after reset without initializing
-  address-distinct values. All expected read values in the five stress samples
-  were zero during the review.
-- **Impact:** Reordered or misaddressed responses can pass the data checks if
-  response counts and statuses remain correct.
-- **Suggested resolution:** Initialize distinguishable values before issuing the
-  overlapped reads, including read-only locations through the test model.
-
 ### KI-15 [P1] Memory-boundary tests can reject legal adjacent mappings
 
 - **Location:** `src/bus_generator/templates/tb_{{axi4l}}_regs.v.jinja2:545-563`.
